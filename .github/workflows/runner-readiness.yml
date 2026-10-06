@@ -1,0 +1,40 @@
+name: Self-hosted runner readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: Label of the self-hosted runner to inspect
+        required: true
+        default: self-hosted
+      ecosystems:
+        description: Comma-separated ecosystems used by your repositories
+        required: true
+        default: go,maven,gradle,dotnet,python,npm,ruby
+      concurrent_runners:
+        description: Optional number of Dependabot runners sharing this host
+        required: false
+
+jobs:
+  inspect:
+    runs-on: ${{ inputs.runner_label }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect runner
+        env:
+          ECOSYSTEMS: ${{ inputs.ecosystems }}
+          CONCURRENT_RUNNERS: ${{ inputs.concurrent_runners }}
+        run: |
+          args=(--ecosystems "$ECOSYSTEMS"
+                --json-file "$RUNNER_TEMP/runner-readiness.json"
+                --markdown-file "$GITHUB_STEP_SUMMARY")
+          if [[ -n "$CONCURRENT_RUNNERS" ]]; then
+            args+=(--concurrent-runners "$CONCURRENT_RUNNERS")
+          fi
+          python3 scripts/runner_readiness.py "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runner-readiness
+          path: ${{ runner.temp }}/runner-readiness.json
