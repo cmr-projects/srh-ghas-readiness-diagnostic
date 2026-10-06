@@ -22,6 +22,23 @@ class RunnerReadinessTests(unittest.TestCase):
         self.assertEqual(next(row["status"] for row in rows
                               if row["name"] == "HTTPS probes"), "unknown")
 
+    def test_report_probes_each_hostname_with_its_source(self):
+        from urllib.error import HTTPError
+
+        with patch.object(readiness, "tool"), patch.object(readiness, "docker"), \
+                patch.object(readiness, "environment"), patch.object(readiness, "resources"), \
+                patch.object(readiness, "runner_version"), \
+                patch.object(readiness.urllib.request, "urlopen",
+                             side_effect=HTTPError("https://example.com/", 403, "Forbidden", {}, None)):
+            rows = readiness.report(["go"], probe_network=True)
+        probes = {r["name"]: r for r in rows if r["kind"] == "network"}
+        self.assertEqual(set(probes), set(readiness.ENDPOINTS["common"]) |
+                         set(readiness.ENDPOINTS["go"]))
+        self.assertTrue(all(r["status"] == "yes" for r in probes.values()))
+        self.assertEqual(probes["dependabot-actions.githubapp.com"]["source"],
+                         readiness.DOCS["dependabot"])
+        self.assertEqual(probes["go.dev"]["source"], readiness.DOCS["autosubmit"])
+
     def test_network_failure_does_not_repeat_proxy_credentials(self):
         from urllib.error import URLError
 

@@ -261,7 +261,7 @@ def report(ecosystems, probe_network=True, concurrent_runners=None, registries=(
             "Pass --concurrent-runners to check whether increased Docker network capacity is required",
             "dependabot")
     if probe_network:
-        hosts = dict.fromkeys((host, "runner") for host in ENDPOINTS["common"])
+        hosts = dict.fromkeys(ENDPOINTS["common"], "runner")
         hosts["dependabot-actions.githubapp.com"] = "dependabot"
         for eco in ecosystems:
             for host in ENDPOINTS.get(eco, ()):
