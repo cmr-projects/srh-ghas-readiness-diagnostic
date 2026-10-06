@@ -6,7 +6,7 @@ on:
       runner_label:
         description: Label of the self-hosted runner to inspect
         required: true
-        default: self-hosted
+        default: ubuntu-latest
       ecosystems:
         description: Comma-separated ecosystems used by your repositories
         required: true
