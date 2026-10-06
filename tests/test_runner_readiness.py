@@ -69,6 +69,22 @@ class RunnerReadinessTests(unittest.TestCase):
         output = json.dumps(rows)
         self.assertNotIn("my-secret-password", output)
         self.assertNotIn("secret@proxy", output)
+        self.assertEqual(next(r["source"] for r in rows
+                              if r["name"] == "HTTPS_PROXY / https_proxy"),
+                         readiness.DOCS["proxy"])
+        self.assertEqual(next(r["source"] for r in rows
+                              if r["name"] == "NODE_EXTRA_CA_CERTS"),
+                         readiness.DOCS["node_ca"])
+
+    def test_lowercase_proxy_is_detected_without_disclosing_its_value(self):
+        rows = []
+        with patch.dict(readiness.os.environ, {"https_proxy": "http://secret@proxy.example"},
+                        clear=True):
+            readiness.environment(rows)
+        proxy = next(r for r in rows if r["name"] == "HTTPS_PROXY / https_proxy")
+        self.assertEqual(proxy["status"], "yes")
+        self.assertIn("lowercase", proxy["detail"])
+        self.assertNotIn("secret", json.dumps(rows))
 
     def test_runner_version_threshold(self):
         with tempfile.TemporaryDirectory() as root:
@@ -86,10 +102,27 @@ class RunnerReadinessTests(unittest.TestCase):
 
     def test_markdown_escapes_table_content(self):
         rows = []
-        readiness.add(rows, "Runner", "setting", "test|name", "unknown",
+        readiness.add(rows, "Private registry", "network", "test|name", "unknown",
                       "line|value", "runner")
-        self.assertIn("test\\|name", readiness.markdown(rows))
-        self.assertIn("line\\|value", readiness.markdown(rows))
+        output = readiness.markdown(rows)
+        self.assertIn("test\\|name", output)
+        self.assertIn("line\\|value", output)
+        self.assertIn("| Why check it? | Self-hosted consideration | Source documentation |", output)
+        self.assertIn("](https://docs.github.com/", output)
+
+    def test_all_checks_include_reason_self_hosted_context_and_sources(self):
+        from urllib.error import HTTPError
+
+        with patch.object(readiness, "tool"), patch.object(readiness, "docker"), \
+                patch.object(readiness, "runner_version"), \
+                patch.object(readiness.urllib.request, "urlopen",
+                             side_effect=HTTPError("https://example.com/", 403, "Forbidden", {}, None)):
+            rows = readiness.report(readiness.ECOSYSTEMS, registries=("registry.example.com",),
+                                    concurrent_runners=20)
+        self.assertTrue(rows)
+        self.assertTrue(all(r["why"] and r["self_hosted"] and r["sources"] and
+                            r["source"] == r["sources"][0] for r in rows))
+        self.assertIn("registry.example.com", {r["name"] for r in rows})
 
     def test_docker_without_client_is_not_mistaken_for_daemon_failure(self):
         rows = []
