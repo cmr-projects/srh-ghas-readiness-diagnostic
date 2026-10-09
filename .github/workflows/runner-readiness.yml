@@ -26,6 +26,7 @@ jobs:
         env:
           ECOSYSTEMS: ${{ inputs.ecosystems }}
           CONCURRENT_RUNNERS: ${{ inputs.concurrent_runners }}
+          READINESS_RUNNER_LABEL: ${{ inputs.runner_label }}
         run: |
           args=(--ecosystems "$ECOSYSTEMS"
                 --json-file "$RUNNER_TEMP/runner-readiness.json"

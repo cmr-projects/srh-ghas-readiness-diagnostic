@@ -75,6 +75,8 @@ CONTEXT = {
     "RUNNER_OS": ("Identify the job's runner OS.", "A self-hosted OS may differ from GitHub's managed images."),
     "RUNNER_ARCH": ("Identify the job's CPU architecture.", "Dependabot updates require Linux x64."),
     "RUNNER_NAME": ("Identify the runner that executed this job.", "Helps distinguish several self-hosted machines; it does not prove runner labels."),
+    "RUNNER_ENVIRONMENT": ("Identify whether this job ran on a GitHub-hosted or self-hosted runner.", "Shows the actual runner environment rather than inferring it from the requested label."),
+    "Requested runner label": ("Record the runs-on input selected for this diagnostic workflow.", "Compare the requested target with RUNNER_ENVIRONMENT and RUNNER_NAME; this does not prove all runner labels."),
     "RUNNER_TEMP": ("Find the job's writable temporary directory and runner installation when possible.", "Custom runner installations can use different paths."),
     "RUNNER_TOOL_CACHE": ("Inspect the Actions tool-cache location.", "Self-hosted images may have no pre-populated tool cache."),
     "JAVA_HOME": ("CodeQL Java extraction expects a JDK at JAVA_HOME.", "A custom image may need a JDK configured; hosted images provide one."),
@@ -214,10 +216,29 @@ def network(rows, area, host, source):
         source)
 
 
+def redact_url_credentials(value):
+    has_scheme = "://" in value
+    try:
+        parsed = urllib.parse.urlsplit(value if has_scheme else "//" + value)
+        if not parsed.hostname:
+            return "Set (malformed URL; value redacted)"
+        parsed.port
+    except ValueError:
+        return "Set (malformed URL; value redacted)"
+    netloc = parsed.netloc
+    if "@" in netloc:
+        netloc = "[redacted]@" + netloc.rsplit("@", 1)[1]
+    result = urllib.parse.urlunsplit((
+        parsed.scheme, netloc, parsed.path,
+        "[redacted]" if parsed.query else "", "[redacted]" if parsed.fragment else "",
+    ))
+    return result if has_scheme else result[2:]
+
+
 def environment(rows):
     variable_sources = {
         "RUNNER_OS": "variables", "RUNNER_ARCH": "variables",
-        "RUNNER_NAME": "variables", "RUNNER_TEMP": "variables",
+        "RUNNER_NAME": "variables", "RUNNER_ENVIRONMENT": "variables", "RUNNER_TEMP": "variables",
         "RUNNER_TOOL_CACHE": "variables", "JAVA_HOME": "codeql_system",
         "NODE_EXTRA_CA_CERTS": ("node_ca", "dependabot"),
         "SSL_CERT_FILE": "python_ssl",
@@ -228,15 +249,25 @@ def environment(rows):
     }
     for name, source in variable_sources.items():
         value = os.environ.get(name)
-        # Never print variable contents: proxy URLs and even paths can contain credentials.
+        if name in ("GRADLE_PLUGIN_REPOSITORY_USERNAME", "GRADLE_PLUGIN_REPOSITORY_PASSWORD"):
+            detail = "Set (credential redacted)"
+        elif name == "GRADLE_PLUGIN_REPOSITORY_URL" and value:
+            detail = redact_url_credentials(value)
+        else:
+            detail = value
         add(rows, "Environment", "variable", name, "yes" if value else "no",
-            "Set (value redacted)" if value else "Not set (may be optional)", source)
+            detail if value else "Not set (may be optional)", source)
+    requested_label = os.environ.get("READINESS_RUNNER_LABEL")
+    if requested_label:
+        add(rows, "Runner", "setting", "Requested runner label", "yes",
+            requested_label, "runner")
     for upper, lower in (("HTTPS_PROXY", "https_proxy"), ("HTTP_PROXY", "http_proxy"),
                          ("NO_PROXY", "no_proxy")):
         value = os.environ.get(lower) or os.environ.get(upper)
         add(rows, "Environment", "variable", f"{upper} / {lower}",
             "yes" if value else "no",
-            ("Set (value redacted; " + ("lowercase" if os.environ.get(lower) else "uppercase") + ")")
+            ((value if upper == "NO_PROXY" else redact_url_credentials(value)) +
+             " (" + ("lowercase" if os.environ.get(lower) else "uppercase") + ")")
             if value else "Neither case set (optional)", "proxy")
     for name in ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"):
         value = os.environ.get(name)

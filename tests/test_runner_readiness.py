@@ -76,7 +76,71 @@ class RunnerReadinessTests(unittest.TestCase):
                               if r["name"] == "NODE_EXTRA_CA_CERTS"),
                          readiness.DOCS["node_ca"])
 
-    def test_lowercase_proxy_is_detected_without_disclosing_its_value(self):
+    def test_runner_identity_and_requested_label_are_visible_in_both_reports(self):
+        values = {
+            "RUNNER_OS": "Linux", "RUNNER_ARCH": "X64",
+            "RUNNER_NAME": "customer-runner-01", "RUNNER_ENVIRONMENT": "self-hosted",
+            "RUNNER_TEMP": "/opt/actions/_work/_temp",
+            "RUNNER_TOOL_CACHE": "/opt/actions/_work/_tool",
+        }
+        rows = []
+        with patch.dict(readiness.os.environ, {
+            **values, "READINESS_RUNNER_LABEL": "customer-diagnostic",
+            "GITHUB_TOKEN": "not-for-the-report",
+        }, clear=True):
+            readiness.environment(rows)
+        by_name = {r["name"]: r for r in rows}
+        text = readiness.markdown(rows)
+        for name, value in values.items():
+            self.assertEqual(by_name[name]["status"], "yes")
+            self.assertEqual(by_name[name]["detail"], value)
+            self.assertIn(value, text)
+        self.assertEqual(by_name["Requested runner label"]["detail"], "customer-diagnostic")
+        self.assertNotIn("not-for-the-report", text + json.dumps(rows))
+
+    def test_noncredential_variables_are_visible_and_url_credentials_are_redacted(self):
+        rows = []
+        values = {
+            "JAVA_HOME": "/opt/private-jdk",
+            "NODE_EXTRA_CA_CERTS": "/opt/private-ca.pem",
+            "SSL_CERT_FILE": "/opt/private-ssl.pem",
+            "GH_DEPENDENCY_SUBMISSION_SKIP_CACHE": "true",
+            "NO_PROXY": "localhost,registry.example",
+            "GRADLE_PLUGIN_REPOSITORY_URL": "https://user:password@registry.example",
+            "GRADLE_PLUGIN_REPOSITORY_USERNAME": "private-user",
+            "GRADLE_PLUGIN_REPOSITORY_PASSWORD": "private-password",
+        }
+        with patch.dict(readiness.os.environ, values, clear=True):
+            readiness.environment(rows)
+        output = json.dumps(rows) + readiness.markdown(rows)
+        for name in ("JAVA_HOME", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
+                     "GH_DEPENDENCY_SUBMISSION_SKIP_CACHE", "NO_PROXY"):
+            self.assertIn(values[name], output)
+        self.assertIn("https://[redacted]@registry.example", output)
+        self.assertNotIn("user:password", output)
+        self.assertNotIn("private-user", output)
+        self.assertNotIn("private-password", output)
+
+    def test_proxy_credentials_and_url_query_parameters_are_redacted(self):
+        rows = []
+        with patch.dict(readiness.os.environ, {
+            "https_proxy": "http://user:private-password@proxy.example:8080?token=secret-token",
+            "GRADLE_PLUGIN_REPOSITORY_URL": "https://registry.example/plugins?token=secret-token#secret",
+        }, clear=True):
+            readiness.environment(rows)
+        output = readiness.markdown(rows) + json.dumps(rows)
+        self.assertIn("proxy.example:8080", output)
+        self.assertIn("registry.example/plugins", output)
+        self.assertNotIn("private-password", output)
+        self.assertNotIn("secret-token", output)
+        self.assertNotIn("#secret", output)
+
+    def test_malformed_proxy_url_is_reported_without_echoing_its_value(self):
+        value = "http://secret@[malformed"
+        self.assertEqual(readiness.redact_url_credentials(value),
+                         "Set (malformed URL; value redacted)")
+
+    def test_lowercase_proxy_is_detected_without_disclosing_credentials(self):
         rows = []
         with patch.dict(readiness.os.environ, {"https_proxy": "http://secret@proxy.example"},
                         clear=True):
@@ -84,6 +148,7 @@ class RunnerReadinessTests(unittest.TestCase):
         proxy = next(r for r in rows if r["name"] == "HTTPS_PROXY / https_proxy")
         self.assertEqual(proxy["status"], "yes")
         self.assertIn("lowercase", proxy["detail"])
+        self.assertIn("proxy.example", proxy["detail"])
         self.assertNotIn("secret", json.dumps(rows))
 
     def test_runner_version_threshold(self):
