@@ -194,12 +194,24 @@ class RunnerReadinessTests(unittest.TestCase):
         self.assertIn("...", table)
         self.assertNotIn(value, table)
         self.assertIn("Manual verification required", table)
-        self.assertIn("### Check 1", output)
-        self.assertIn("### Check 2", output)
+        self.assertIn("### check-1", output)
+        self.assertIn("### check-2", output)
         self.assertIn(f"**Observed value / finding:** {value}", output)
         self.assertIn("Verify repository access to the requested label.", output)
         self.assertIn(f"**Why check it?** {rows[0]['why']}", output)
         self.assertIn(f"**Self-hosted consideration:** {rows[1]['self_hosted']}", output)
+
+    def test_markdown_link_targets_exactly_match_unique_heading_text(self):
+        rows = []
+        for index in range(12):
+            readiness.add(rows, "Private registry", "network", "registry.example.com",
+                          "yes", f"HTTPS response {index}", "autosubmit_setup")
+        output = readiness.markdown(rows)
+        targets = [line[4:] for line in output.splitlines() if line.startswith("### ")]
+        self.assertEqual(targets, [f"check-{index}" for index in range(1, 13)])
+        self.assertEqual(len(set(targets)), len(rows))
+        for target in targets:
+            self.assertEqual(output.count(f"](#{target})"), 1)
 
     def test_all_checks_include_reason_self_hosted_context_and_sources(self):
         from urllib.error import HTTPError
@@ -215,7 +227,7 @@ class RunnerReadinessTests(unittest.TestCase):
                             r["source"] == r["sources"][0] for r in rows))
         self.assertIn("registry.example.com", {r["name"] for r in rows})
         output = readiness.markdown(rows)
-        self.assertEqual(output.count("### Check "), len(rows))
+        self.assertEqual(output.count("### check-"), len(rows))
         for index, row in enumerate(rows, 1):
             self.assertIn(f"](#check-{index})", output)
             self.assertIn(row["why"], output)

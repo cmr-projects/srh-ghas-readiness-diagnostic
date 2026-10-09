@@ -505,7 +505,7 @@ def markdown(rows):
     lines.extend(["", "## Check details", ""])
     for index, row in enumerate(rows, 1):
         lines.extend([
-            f"### Check {index}", "",
+            f"### check-{index}", "",
             f"**{cell(row['name'])}**", "",
             f"**Area / type:** {cell(row['area'])} / {cell(row['kind'])}", "",
             f"**Result:** {cell(row['status'])}", "",
