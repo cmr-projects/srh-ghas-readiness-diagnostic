@@ -6,7 +6,7 @@ A read-only report of tools, environment variables, system settings, and outboun
 
 In this repository, open **Actions → Self-hosted runner readiness → Run workflow**. Choose a label that targets the runner you want to inspect, and enter only the package ecosystems your repositories use. If more than 14 Dependabot runners share a host, enter the host's runner count to inspect its Docker network-pool setting. The job summary contains runner context, a compact Markdown results table, and per-check details; the run uploads Markdown and JSON reports in the `runner-readiness` artifact. Download the Markdown report to read it in your preferred viewer.
 
-The workflow requires Python 3 on the runner and uses `actions/checkout@v4` and `actions/upload-artifact@v4`. Run the command directly as the Actions runner user if the workflow cannot start:
+The workflow requires Python 3 on the runner and uses `actions/checkout` v4.4.0 and `actions/upload-artifact` v4.6.2, pinned to full commit SHAs with release-version comments. Updates require an explicit pin change rather than following moving tags. Run the command directly as the Actions runner user if the workflow cannot start:
 
 ```bash
 python3 scripts/runner_readiness.py --ecosystems go,maven,gradle,dotnet,python,npm,ruby \

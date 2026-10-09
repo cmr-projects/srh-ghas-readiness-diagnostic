@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,15 @@ from scripts import runner_readiness as readiness
 
 
 class RunnerReadinessTests(unittest.TestCase):
+    def test_workflow_actions_are_pinned_to_full_commit_shas(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github" / "workflows" / "runner-readiness.yml").read_text()
+        uses = re.findall(r"^\s*-\s*uses:\s+(.+)$", workflow, re.MULTILINE)
+        self.assertTrue(uses)
+        for action in uses:
+            with self.subTest(action=action):
+                self.assertRegex(action, r"^[^/@\s]+/[^@\s]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$")
+
     def test_standalone_report_skips_unverifiable_settings_and_network(self):
         with patch.object(readiness.platform, "system", return_value="Linux"), \
                 patch.object(readiness.platform, "machine", return_value="x86_64"), \
