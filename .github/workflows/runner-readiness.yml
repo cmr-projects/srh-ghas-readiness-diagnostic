@@ -30,12 +30,15 @@ jobs:
         run: |
           args=(--ecosystems "$ECOSYSTEMS"
                 --json-file "$RUNNER_TEMP/runner-readiness.json"
-                --markdown-file "$GITHUB_STEP_SUMMARY")
+                --markdown-file "$RUNNER_TEMP/runner-readiness.md")
           if [[ -n "$CONCURRENT_RUNNERS" ]]; then
             args+=(--concurrent-runners "$CONCURRENT_RUNNERS")
           fi
           python3 scripts/runner_readiness.py "${args[@]}"
+          cat "$RUNNER_TEMP/runner-readiness.md" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: runner-readiness
-          path: ${{ runner.temp }}/runner-readiness.json
+          path: |
+            ${{ runner.temp }}/runner-readiness.json
+            ${{ runner.temp }}/runner-readiness.md

@@ -91,6 +91,9 @@ class RunnerReadinessTests(unittest.TestCase):
             readiness.environment(rows)
         by_name = {r["name"]: r for r in rows}
         text = readiness.markdown(rows)
+        self.assertIn("## Runner context", text)
+        self.assertIn("**Requested runner label:** customer-diagnostic", text)
+        self.assertIn("**RUNNER_ENVIRONMENT:** self-hosted", text)
         for name, value in values.items():
             self.assertEqual(by_name[name]["status"], "yes")
             self.assertEqual(by_name[name]["detail"], value)
@@ -172,8 +175,31 @@ class RunnerReadinessTests(unittest.TestCase):
         output = readiness.markdown(rows)
         self.assertIn("test\\|name", output)
         self.assertIn("line\\|value", output)
-        self.assertIn("| Why check it? | Self-hosted consideration | Source documentation |", output)
+        self.assertIn("| Check | Result | Observed value / finding |", output)
+        self.assertIn("**Why check it?**", output)
+        self.assertIn("**Self-hosted consideration:**", output)
+        self.assertIn("**Source documentation:**", output)
         self.assertIn("](https://docs.github.com/", output)
+
+    def test_compact_table_links_to_details_and_preserves_full_values(self):
+        rows = []
+        value = "/opt/" + "runner-tool-cache/" * 10
+        readiness.add(rows, "Environment", "variable", "RUNNER_TOOL_CACHE", "yes",
+                      value, "variables")
+        readiness.add(rows, "GitHub settings", "manual", "Runner labels and group access",
+                      "unknown", "Verify repository access to the requested label.", "autosubmit_setup")
+        output = readiness.markdown(rows)
+        table = output.split("## Results", 1)[1].split("## Check details", 1)[0]
+        self.assertIn("[RUNNER_TOOL_CACHE](#check-1)", table)
+        self.assertIn("...", table)
+        self.assertNotIn(value, table)
+        self.assertIn("Manual verification required", table)
+        self.assertIn("### Check 1", output)
+        self.assertIn("### Check 2", output)
+        self.assertIn(f"**Observed value / finding:** {value}", output)
+        self.assertIn("Verify repository access to the requested label.", output)
+        self.assertIn(f"**Why check it?** {rows[0]['why']}", output)
+        self.assertIn(f"**Self-hosted consideration:** {rows[1]['self_hosted']}", output)
 
     def test_all_checks_include_reason_self_hosted_context_and_sources(self):
         from urllib.error import HTTPError
@@ -188,12 +214,40 @@ class RunnerReadinessTests(unittest.TestCase):
         self.assertTrue(all(r["why"] and r["self_hosted"] and r["sources"] and
                             r["source"] == r["sources"][0] for r in rows))
         self.assertIn("registry.example.com", {r["name"] for r in rows})
+        output = readiness.markdown(rows)
+        self.assertEqual(output.count("### Check "), len(rows))
+        for index, row in enumerate(rows, 1):
+            self.assertIn(f"](#check-{index})", output)
+            self.assertIn(row["why"], output)
+            self.assertIn(row["self_hosted"], output)
+            for label, source in zip(row["source_labels"], row["sources"]):
+                self.assertIn(f"[{label}]({source})", output)
 
     def test_docker_without_client_is_not_mistaken_for_daemon_failure(self):
         rows = []
         with patch.object(readiness.shutil, "which", return_value=None):
             readiness.docker(rows)
         self.assertEqual([r["status"] for r in rows], ["no", "unknown"])
+
+    def test_docker_rootless_mode_reports_observed_value(self):
+        for code, options, status, detail in (
+            (0, '["name=rootless"]', "yes", "Enabled"),
+            (0, '["name=seccomp"]', "no", "Not enabled"),
+            (1, "", "unknown", "Unable to determine Docker security options"),
+        ):
+            with self.subTest(status=status):
+                rows = []
+                results = [
+                    readiness.subprocess.CompletedProcess([], 0, "29.0.0", ""),
+                    readiness.subprocess.CompletedProcess([], code, options, ""),
+                ]
+                with patch.object(readiness.shutil, "which", return_value="/usr/bin/docker"), \
+                        patch.object(readiness, "tool"), \
+                        patch.object(readiness.subprocess, "run", side_effect=results):
+                    readiness.docker(rows)
+                row = next(r for r in rows if r["name"] == "Docker rootless mode")
+                self.assertEqual(row["status"], status)
+                self.assertTrue(row["detail"].startswith(detail))
 
     def test_high_runner_concurrency_reports_missing_address_pools(self):
         with patch.object(readiness.platform, "system", return_value="Linux"), \

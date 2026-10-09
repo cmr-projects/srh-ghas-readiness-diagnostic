@@ -310,7 +310,9 @@ def docker(rows):
             add(rows, "Dependabot updates", "setting", "Docker rootless mode",
                 "yes" if security.returncode == 0 and "rootless" in security.stdout else
                 "no" if security.returncode == 0 else "unknown",
-                "Recommended, not required; privileged daemon access is an alternative",
+                ("Enabled" if "rootless" in security.stdout else "Not enabled")
+                + "; recommended, not required; authorized daemon access is an alternative"
+                if security.returncode == 0 else "Unable to determine Docker security options",
                 "dependabot")
         except (OSError, subprocess.TimeoutExpired) as exc:
             add(rows, "Dependabot updates", "setting", "Docker rootless mode", "unknown",
@@ -473,17 +475,45 @@ def markdown(rows):
     def cell(value):
         return str(value).replace("|", "\\|").replace("\n", " ")
 
+    def sources(row):
+        return ", ".join(f"[{cell(label)}]({url})" for label, url in
+                         zip(row["source_labels"], row["sources"]))
+
     lines = ["# Self-hosted runner readiness", "",
              "Yes/no describes the observed host or HTTPS response, not end-to-end workflow success.",
              "Unknown requires GitHub configuration or a workload-specific check. Optional tools are inventory, not blockers.",
              "An unset optional variable is not an unmet requirement. A network response does not prove registry authorization.", "",
-             "| Area | Type | Check | Present/accessible | Detail | Why check it? | Self-hosted consideration | Source documentation |",
-             "|---|---|---|---|---|---|---|---|"]
-    lines.extend("| " + " | ".join(map(cell, (r["area"], r["kind"], r["name"],
-                                            r["status"], r["detail"], r["why"],
-                                            r["self_hosted"]))) +
-                 " | " + ", ".join(f"[{cell(label)}]({url})" for label, url in
-                                 zip(r["source_labels"], r["sources"])) + " |" for r in rows)
+             "## Runner context", ""]
+    context_names = ("Requested runner label", "RUNNER_ENVIRONMENT", "RUNNER_NAME",
+                     "RUNNER_OS", "RUNNER_ARCH", "RUNNER_TEMP", "RUNNER_TOOL_CACHE")
+    by_name = {row["name"]: row for row in rows}
+    for name in context_names:
+        row = by_name.get(name)
+        if row:
+            lines.append(f"- **{name}:** {cell(row['detail'])}")
+    lines.extend(["", "## Results", "",
+                  "Select a check for its full observed value, explanation, and documentation.",
+                  "Long observations are shortened only in this table; full values appear below.", "",
+                  "| Check | Result | Observed value / finding |",
+                  "|---|---|---|"])
+    for index, row in enumerate(rows, 1):
+        observation = "Manual verification required" if row["kind"] == "manual" else row["detail"]
+        observation = str(observation).replace("\n", " ")
+        if len(observation) > 64:
+            observation = observation[:61] + "..."
+        lines.append(f"| [{cell(row['name'])}](#check-{index}) | {cell(row['status'])} | {cell(observation)} |")
+    lines.extend(["", "## Check details", ""])
+    for index, row in enumerate(rows, 1):
+        lines.extend([
+            f"### Check {index}", "",
+            f"**{cell(row['name'])}**", "",
+            f"**Area / type:** {cell(row['area'])} / {cell(row['kind'])}", "",
+            f"**Result:** {cell(row['status'])}", "",
+            f"**Observed value / finding:** {cell(row['detail'])}", "",
+            f"**Why check it?** {cell(row['why'])}", "",
+            f"**Self-hosted consideration:** {cell(row['self_hosted'])}", "",
+            f"**Source documentation:** {sources(row)}", "",
+        ])
     return "\n".join(lines) + "\n"
 
 
